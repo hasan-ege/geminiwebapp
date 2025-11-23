@@ -1,144 +1,166 @@
 package com.bozkurt.geminiwebapp
 
-import android.app.Activity
+import android.Manifest
+import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
-import android.webkit.CookieManager
-import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private var cameraPhotoUri: Uri? = null
-    private var pendingPermissionRequest: PermissionRequest? = null
+    private var uploadMessage: ValueCallback<Array<Uri>>? = null
+    private var photoURI: Uri? = null
+    private var currentPhotoPath: String? = null
 
-    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        var results: Array<Uri>? = null
-        if (result.resultCode == Activity.RESULT_OK) {
-            if (result.data?.data != null) {
-                results = arrayOf(result.data!!.data!!)
-            } else if (cameraPhotoUri != null) {
-                results = arrayOf(cameraPhotoUri!!)
-            }
+    // Kamera izni isteyici
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (!isGranted) {
+            Toast.makeText(this, "Kamera izni verilmediği için fotoğraf çekilemiyor.", Toast.LENGTH_SHORT).show()
         }
-        filePathCallback?.onReceiveValue(results)
-        filePathCallback = null
     }
 
-    private val micPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) {
-            // Grant the specific permission requested
-            pendingPermissionRequest?.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-        } else {
-            pendingPermissionRequest?.deny()
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (uploadMessage == null) return@registerForActivityResult
+
+        var results: Array<Uri>? = null
+
+        if (result.resultCode == RESULT_OK) {
+            // Eğer data null ise muhtemelen kamera kullanılmıştır
+            if (result.data == null || result.data?.dataString == null) {
+                if (currentPhotoPath != null) {
+                    val file = File(currentPhotoPath!!)
+                    if (file.exists() && file.length() > 0) {
+                        results = arrayOf(Uri.fromFile(file))
+                    }
+                }
+            } else {
+                // Galeri seçimi
+                val dataString = result.data?.dataString
+                if (dataString != null) {
+                    results = arrayOf(Uri.parse(dataString))
+                }
+            }
         }
-        // Clean up the pending request
-        pendingPermissionRequest = null
+
+        uploadMessage?.onReceiveValue(results)
+        uploadMessage = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val webView = findViewById<WebView>(R.id.webView)
+        // Açılışta Kamera İzni Kontrolü (Opsiyonel ama iyi olur)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
 
-        // Privacy settings
-        val cookieManager = CookieManager.getInstance()
-        cookieManager.setAcceptThirdPartyCookies(webView, false)
+        val webView = findViewById<WebView>(R.id.webView)
 
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
+            allowContentAccess = true
             mediaPlaybackRequiresUserGesture = false
-
-            // Privacy enhancements
-            saveFormData = false // Don't save form data
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW // Block mixed content
-            setGeolocationEnabled(false) // Disable geolocation
+            databaseEnabled = true
         }
 
         webView.webViewClient = WebViewClient()
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
-                this@MainActivity.filePathCallback = filePathCallback
+                if (uploadMessage != null) {
+                    uploadMessage?.onReceiveValue(null)
+                    uploadMessage = null
+                }
+                uploadMessage = filePathCallback
 
-                val takePictureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                if (takePictureIntent.resolveActivity(packageManager) != null) {
-                    var photoFile: File? = null
-                    try {
-                        photoFile = createImageFile()
-                    } catch (ex: IOException) {
-                        // Error occurred while creating the File
-                    }
+                var takePictureIntent: Intent? = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+
+                try {
+                    val photoFile: File? = createImageFile()
                     if (photoFile != null) {
-                        cameraPhotoUri = FileProvider.getUriForFile(
+                        photoURI = FileProvider.getUriForFile(
                             this@MainActivity,
-                            "com.bozkurt.geminiwebapp.fileprovider",
+                            "${applicationContext.packageName}.provider",
                             photoFile
                         )
-                        takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
+
+                        takePictureIntent?.putExtra(MediaStore.EXTRA_OUTPUT, photoURI)
+
+                        // KRİTİK DÜZELTME: İzin bayrakları ve ClipData
+                        takePictureIntent?.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            takePictureIntent?.clipData = ClipData.newRawUri("", photoURI)
+                        }
                     } else {
-                        takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, null as Uri?)
+                        takePictureIntent = null
                     }
+                } catch (ex: Exception) {
+                    ex.printStackTrace()
+                    takePictureIntent = null
                 }
 
                 val contentSelectionIntent = Intent(Intent.ACTION_GET_CONTENT)
                 contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE)
                 contentSelectionIntent.type = "*/*"
-
-                val intentArray: Array<Intent?> = takePictureIntent?.let { arrayOf(it) } ?: arrayOfNulls(0)
+                val extraMimeTypes = arrayOf("image/*", "video/*", "application/pdf")
+                contentSelectionIntent.putExtra(Intent.EXTRA_MIME_TYPES, extraMimeTypes)
 
                 val chooserIntent = Intent(Intent.ACTION_CHOOSER)
                 chooserIntent.putExtra(Intent.EXTRA_INTENT, contentSelectionIntent)
-                chooserIntent.putExtra(Intent.EXTRA_TITLE, "Image Chooser")
-                chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray)
+                chooserIntent.putExtra(Intent.EXTRA_TITLE, "Fotoğraf Çek veya Dosya Seç")
 
-                fileChooserLauncher.launch(chooserIntent)
-                return true
-            }
-
-            override fun onPermissionRequest(request: PermissionRequest?) {
-                 if (request?.resources?.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) == true) {
-                    pendingPermissionRequest = request
-                    micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                } else {
-                    request?.deny()
+                if (takePictureIntent != null) {
+                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(takePictureIntent))
                 }
+
+                try {
+                    fileChooserLauncher.launch(chooserIntent)
+                } catch (e: Exception) {
+                    uploadMessage?.onReceiveValue(null)
+                    uploadMessage = null
+                    return false
+                }
+
+                return true
             }
         }
 
         webView.loadUrl("https://gemini.google.com")
     }
 
-    @Throws(IOException::class)
     private fun createImageFile(): File {
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
-        val imageFileName = "JPEG_" + timeStamp + "_"
-        val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
-        return File.createTempFile(
-            imageFileName, /* prefix */
-            ".jpg", /* suffix */
-            storageDir      /* directory */
-        )
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val imageFileName = "IMG_" + timeStamp + "_"
+        // Cache dizinini kullanmak bazen izin sorunlarını çözer
+        val storageDir = externalCacheDir ?: cacheDir
+        val image = File.createTempFile(imageFileName, ".jpg", storageDir)
+        currentPhotoPath = image.absolutePath
+        return image
     }
 }
