@@ -1,0 +1,33 @@
+# Folders
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+
+# Files
+*.iml
+
+# Mac
+.DS_Store
+
+# Misc
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Keystore
+*.jks
+*.keystore
+
+# Log files
+*.log
+
+# Caching
+.cxx/
+*/.cxx/
+
+# Distribution
+/dist/
