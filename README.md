@@ -12,5 +12,4 @@ This is a simple Android application that displays the Gemini website (gemini.go
 The application consists of a single `MainActivity` that contains a Jetpack Compose `AndroidView`. This `AndroidView` is configured as follows:
 - JavaScript is enabled.
 - DOM Storage is enabled.
-- Third-party cookies are accepted.
 - It loads the URL `https://gemini.google.com`.
