@@ -6,9 +6,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,11 +57,20 @@ class MainActivity : AppCompatActivity() {
 
         val webView = findViewById<WebView>(R.id.webView)
 
+        // Privacy settings
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptThirdPartyCookies(webView, false)
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
             mediaPlaybackRequiresUserGesture = false
+
+            // Privacy enhancements
+            saveFormData = false // Don't save form data
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW // Block mixed content
+            setGeolocationEnabled(false) // Disable geolocation
         }
 
         webView.webViewClient = WebViewClient()
